@@ -1,0 +1,17 @@
+.env
+.venv/
+state.json
+journal.md
+logs/
+__pycache__/
+pending.json
+settings.json
+watch_state.json
+daytrade_state.json
+daytrade_history.json
+daytrade.pid
+
+# downloaded market data and caches (large, not ours to redistribute)
+data/
+*.parquet
+.DS_Store
