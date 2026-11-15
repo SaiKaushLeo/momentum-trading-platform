@@ -46,11 +46,12 @@ The bot runs a **15-minute opening range breakout on QQQ**, the Nasdaq-100 fund.
 1. It watches the first 15 minutes of trading (9:30–9:45 AM New York).
 2. If a 5-minute candle closes above that range, it buys with about 98% of your cash.
 3. It immediately places a **safety stop** at the bottom of the range. Alpaca holds the stop, so it works even if the Mac sleeps.
-4. If the stop isn't hit, it sells everything at 3:50 PM New York time. It never holds overnight.
+4. Once the trade is up as much as it risked (buy price minus the stop), the stop moves up to the buy price, so a winner can't turn into a loser.
+5. If the stop isn't hit, it sells everything at 3:50 PM New York time. It never holds overnight.
 
 At most one trade a day, and no new trade after 3:30 PM. **Disarm** and **Sell now** work at any time. While it's armed, the Mac is kept awake. If the Mac was off at the close, it sells the leftover position at the next open. You get a notification at every step.
 
-**Honest expectations:** tested on 5-minute prices from 2016 to 2026, including costs (`research/intraday.py`). It made about **1.6% a year** (5.2% since 2021), against about **18% a year** for just holding QQQ. It won about **46%** of trades, with a worst drop of about −20%.
+**Honest expectations:** tested on 5-minute prices from 2016 to 2026, including costs (`research/intraday.py`). With the breakeven stop (added Nov 13, 2026) it made about **2.9% a year** (7.0% since 2021), against about **18% a year** for just holding QQQ. It won about **43%** of trades, with a worst drop of about −15%. Taking quick profits wins more often (65%) but loses money overall, because the few big winners pay for all the small losses (`research/sell_high.py`).
 
 ## What the bot does, in plain English
 Since Nov 5, 2026 it runs **half and half**:
@@ -99,7 +100,10 @@ Data: 10 years of 5-minute prices and 83,000 market news articles from Alpaca's 
 | Rotate the 2x trend into the best rising "safe" assets when weak (9 versions) | 4 of 9 beat cash, all still lost in 2022: not reliable | No |
 | **Half 2x trend + half all-weather** | steadier: 11.2%/yr in the quick test, 9.6% in the realistic replay, worst drop −14% to −16% | **Yes (running)** |
 | Bet against the market (−1x fund) when the S&P 500 is below its 200-day average | 7.1%/yr vs 11.9% for going to cash, worse in both halves | No |
-| Day trading: opening range breakout, buy only | 1.6%/yr vs 18.1% holding QQQ | Off |
+| Day trading: opening range breakout, buy only | 1.6%/yr vs 18.1% holding QQQ | On (Sai turned it back on) |
+| Same, sell at a profit target (0.5x to 3x the risk) | −1.7% to 1.4%/yr: wins more often, makes less | No |
+| Same, trailing stop (0.5x to 2x the risk below the high) | −1.4% to 2.2%/yr | No |
+| **Same, stop to the buy price once up 1x the risk** | **2.9%/yr, worst −15%, better in both halves** | **Yes (Nov 13)** |
 | Same, buy **and** bet against (PSQ) | −5%/yr | No |
 | First-candle direction, intraday momentum (SPY, QQQ) | all lost money after costs | No |
 | **News AI built from scratch** (`news_ai.py`): learns which words came before up and down days | right 52.8% of days; always guessing "up" was right 54.2% | No (headlines shown only) |

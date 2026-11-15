@@ -146,19 +146,21 @@ def blend_universe():
     return list(dict.fromkeys([C.MARKET, C.TREND_FUND, C.AW_CASH] + list(C.AW_ASSETS)))
 
 
-def blend_closes(years=2):
+def blend_closes(years=2, extra=()):
     import yfinance as yf
-    syms = blend_universe()
+    syms = blend_universe() + [s for s in extra if s not in blend_universe()]
     px = yf.download(syms, period=f"{years}y", auto_adjust=True, progress=False)
     return px["Close"][syms].dropna(), px["Open"][syms].dropna()
 
 
 def _blend_plan(positions, equity, dry):
     from strategy import blend_targets, plan_blend
-    closes, _ = blend_closes()
+    closes, _ = blend_closes(extra=list(C.PICKS))
     today = pd.Timestamp.now(tz="America/New_York").normalize().tz_localize(None)
     closes = closes[closes.index < today]  # finished days only
     w, info = blend_targets(closes, len(closes) - 1)
+    keep = 1 - sum(C.PICKS.values())  # your picks come off the top
+    w = {s: x * keep for s, x in w.items()} | dict(C.PICKS)
     prices = closes.iloc[-1].to_dict()
     qtys = {s: positions.get(s, {}).get("qty", 0) for s in prices}
     others = {s: p["qty"] for s, p in positions.items() if s not in prices and s != C.DT_SYMBOL}

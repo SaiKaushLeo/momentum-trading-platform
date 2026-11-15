@@ -661,8 +661,9 @@ with tab_day:
         f"**How it works:** the bot watches the first {C.DT_RANGE_MIN} minutes of trading in **{C.DT_SYMBOL}** "
         f"(a fund of the 100 biggest Nasdaq companies). If {C.DT_SYMBOL} then breaks above that range, it buys with "
         f"about {C.DT_CASH_USE:.0%} of your cash and immediately sets a **safety stop** at the bottom of the range. "
-        f"Alpaca holds that stop, so it works even if your Mac sleeps. If the stop isn't hit, it sells everything at "
-        f"3:50 PM New York time (12:50 PM yours). One trade a day at most, and it never holds overnight."))
+        f"Alpaca holds that stop, so it works even if your Mac sleeps. Once the trade is up as much as it risked, the "
+        f"stop moves up to the buy price, so a winner can't turn into a loser. If the stop isn't hit, it sells everything at "
+        f"3:50 PM New York time (1:50 PM yours). One trade a day at most, and it never holds overnight."))
     try:
         positions = account_snapshot()[3]
     except Exception:

@@ -326,6 +326,10 @@ def plan_blend(w, info, prices, qtys, others, equity):
     falling = ", ".join(name(a) for a in C.AW_ASSETS if a not in info["up"]) or "nothing"
     market_text = (growth + f"\n\n**All-weather half ({1 - s:.0%}):** rising now: {rising}. Skipped (falling): "
                    f"{falling}. Set at each month's end.")
+    if C.PICKS:
+        picks = ", ".join(f"{name(p)} ({p}) {x:.0%}" for p, x in C.PICKS.items())
+        market_text += (f"\n\n**Your long-term picks:** {picks} of the account. The bot buys more after dips "
+                        f"but never sells them; the two halves share the rest.")
     actions, holds = [], []
     for sym, qty in others.items():
         actions.append(dict(side="SELL", symbol=sym, qty=qty, price=None, kind="switch", why=[
@@ -336,6 +340,10 @@ def plan_blend(w, info, prices, qtys, others, equity):
         target = math.floor(investable * w.get(sym, 0.0) / prices[sym])
         have = qtys.get(sym, 0)
         diff = target - have
+        if sym in C.PICKS and diff < 0:  # picks are only ever topped up, never trimmed
+            holds.append(f"KEEP {name(sym)} ({sym}): {have * prices[sym] / equity:.0%} of the account. "
+                         f"Your long-term pick: the bot never sells it.")
+            continue
         off = abs(diff) * prices[sym] / equity
         if diff == 0 or (off < C.REBALANCE_BAND and target and have):
             if have:
@@ -355,6 +363,9 @@ def _blend_why(sym, target, now, info):
     if sym == C.TREND_FUND:
         return [head, f"Growth half: the market is {'healthy' if info['L'] else 'weak'}, so it holds "
                       f"{info['L']:g}x the S&P 500. {sym} moves about 2x the S&P 500 each day."]
+    if sym in C.PICKS:
+        return [head, f"{name(sym)} is your long-term pick. The bot keeps about {target:.0%} of the account in it, "
+                      f"buys more when a dip pulls it more than 2% of the account below that, and never sells it."]
     if sym == C.AW_CASH:
         return [head, "T-bills are basically cash that earns interest. They hold the money that isn't needed "
                       "elsewhere: the growth half when the market is weak, and the all-weather half's spare part."]

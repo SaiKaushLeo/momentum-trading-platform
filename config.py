@@ -13,6 +13,7 @@ DT_RANGE_MIN = 15        # the "opening range" = the first 15 minutes of trading
 DT_LAST_ENTRY = (15, 30) # no new trade after 3:30 PM New York time
 DT_EXIT = (15, 50)       # sell everything by 3:50 PM New York time (10 minutes before the close)
 DT_CASH_USE = 0.98       # use 98% of cash, never borrow
+DT_BREAKEVEN_R = 1.0     # once a trade is up 1x its risk, move the stop up to the buy price (research/sell_high.py)
 TREND_FUND = "SSO"     # ProShares Ultra S&P 500: moves about 2x the S&P 500 each day
 TREND_DAYS = 200       # "healthy" = S&P 500 above its average price over this many days
 ADAPTIVE = True        # adjust how much of the 2x fund to hold to the market's mood (calm vs jumpy)
@@ -28,6 +29,8 @@ AW_ASSETS = {"SPY": "S&P 500 fund", "TLT": "long-term US government bonds", "IEF
 AW_CASH = "BIL"           # 1-3 month US Treasury bills: basically cash that earns interest
 AW_TARGET_VOL = 0.15      # the all-weather half aims for about this much yearly swing (never borrows)
 REBALANCE_BAND = 0.02     # leave a fund alone if it's within 2% of the account of its target
+PICKS = {"NVDA": 0.10}    # your own long-term picks (share of the account): the bot tops them up after
+                          # dips but never sells them. The two halves share what's left.
 
 # Stocks/ETFs the bot is allowed to buy (stock-picking strategy). Big, heavily traded names only.
 WATCHLIST = {

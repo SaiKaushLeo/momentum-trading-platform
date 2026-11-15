@@ -6,7 +6,9 @@ How it works, in plain English:
   2. If a 5-minute candle later CLOSES above the top of that range, buy with ~98% of the cash.
   3. Right away, place a stop order at the bottom of the range. The broker holds it, so it
      protects the trade even if this Mac goes to sleep.
-  4. If the stop isn't hit, sell everything at 3:50 PM New York time. Never hold overnight.
+  4. Once the trade is up as much as it risked (entry minus the stop), move the stop up to the buy price,
+     so a winner can't turn into a loser. Tested better than profit targets or tighter trailing stops.
+  5. If the stop isn't hit, sell everything at 3:50 PM New York time. Never hold overnight.
   At most one trade a day. If there's no breakout by 3:30 PM, no trade that day.
 
 With the autopilot on (config.AUTO_TRADE), the market watch arms each trading day by itself.
@@ -34,8 +36,8 @@ HISTORY = engine.HERE / "daytrade_history.json"
 PIDFILE = engine.HERE / "daytrade.pid"
 
 # Results of the 2016-2026 test (research/intraday.py: 5-minute bars, costs, next-bar fills), shown in the dashboard.
-TESTED = dict(period="Jan 2016 - Nov 2026", per_year="1.6%", hold_per_year="18.1%", worst_drop="-20%",
-              won="46%", recent="5.2%", days_traded="about 71%")
+TESTED = dict(period="Jan 2016 - Nov 2026", per_year="2.9%", hold_per_year="18.1%", worst_drop="-15%",
+              won="43%", recent="7.0%", days_traded="about 71%")
 
 
 # ---------- state ----------
@@ -192,10 +194,12 @@ def step(broker, s, now=None):
             return
         fill = broker.buy_and_wait(sym, qty)
         stop = s["range"]["low"]
-        s.update(status="in_trade", entry=fill, qty=qty, stop=stop)
+        s.update(status="in_trade", entry=fill, qty=qty, stop=stop,
+                 entered_at=now.replace(minute=now.minute // 5 * 5, second=0, microsecond=0).isoformat())
         s["stop_id"] = broker.stop_sell(sym, qty, stop)
         event(s, f"Breakout! Bought {qty} {sym} at ${fill:.2f} (${qty * fill:,.0f}). Safety stop at ${stop:.2f} "
-                 f"(max loss about ${qty * (fill - stop):,.0f}). It sells by 3:50 PM either way.")
+                 f"(max loss about ${qty * (fill - stop):,.0f}). If it reaches ${2 * fill - stop:.2f}, the stop moves "
+                 f"up to ${fill:.2f}. It sells by 3:50 PM either way.")
         return
 
     if s["status"] == "in_trade":
@@ -203,11 +207,39 @@ def step(broker, s, now=None):
         if status == "filled":
             pnl = (px - s["entry"]) * s["qty"]
             s.update(status="stopped", exit=px, pnl=pnl)
-            event(s, f"Safety stop hit: sold {s['qty']} {sym} at ${px:.2f}. Today's result: -${abs(pnl):,.2f} "
-                     f"({px / s['entry'] - 1:+.2%}). No more trades today.")
-            record(s, "Safety stop hit", pnl)
+            what = "Breakeven stop hit" if s.get("breakeven") else "Safety stop hit"
+            event(s, f"{what}: sold {s['qty']} {sym} at ${px:.2f}. Today's result: {'+' if pnl >= 0 else '-'}"
+                     f"${abs(pnl):,.2f} ({px / s['entry'] - 1:+.2%}). No more trades today.")
+            record(s, what, pnl)
         elif (now.hour, now.minute) >= C.DT_EXIT:
             _exit(broker, s, "End of day")
+        elif not s.get("breakeven"):
+            df = bars_today(sym)
+            start = pd.Timestamp(s["entered_at"]) if s.get("entered_at") else df.index[min(n, len(df) - 1)]
+            since = df[df.index >= start]
+            if not since.empty and float(since.high.max()) >= s["entry"] + C.DT_BREAKEVEN_R * (s["entry"] - s["range"]["low"]):
+                _to_breakeven(broker, s)
+
+
+def _to_breakeven(broker, s):
+    """The trade is up 1x its risk: swap the safety stop for one at the buy price."""
+    try:
+        broker.cancel(s["stop_id"])  # waits until the broker confirms
+    except Exception:
+        pass
+    status, _ = broker.order_status(s["stop_id"])
+    if status == "filled":
+        return  # the old stop sold first; the next check records it
+    if status != "canceled":
+        return  # not confirmed yet; try again on the next check
+    if broker.latest_price(s["symbol"]) <= s["entry"]:
+        s["breakeven"] = True
+        _exit(broker, s, "Back to the buy price after being up")
+        return
+    s["stop_id"] = broker.stop_sell(s["symbol"], s["qty"], s["entry"])
+    s.update(stop=s["entry"], breakeven=True)
+    event(s, f"Up {C.DT_BREAKEVEN_R:g}x the risk, so the safety stop moved up to the buy price (${s['entry']:.2f}). "
+             f"Worst case for today's trade is now about break-even.")
 
 
 def cleanup_leftover(broker):
