@@ -28,6 +28,7 @@ backtest.py, research/  replays and experiments on historical data
 daytrade.py            opening-range breakout module (currently off)
 news_ai.py             numpy logistic regression on news headlines
 config.py              all settings in one place
+dags/, pipeline/       Airflow DAG + PySpark job for the market data (see Data pipeline)
 ```
 
 ## Results (simulated)
@@ -46,7 +47,7 @@ The edge over the index is small and not guaranteed to continue.
 
 ## Tech stack
 
-Python, pandas, NumPy, Streamlit, Plotly, alpaca-py, yfinance, Anthropic Claude API (tool use), launchd
+Python, pandas, NumPy, Streamlit, Plotly, alpaca-py, yfinance, Anthropic Claude API (tool use), launchd, Apache Airflow, Apache Spark (PySpark), Parquet
 
 ## Running it
 
@@ -60,3 +61,39 @@ cp .env.example .env            # add your Alpaca PAPER keys (Claude key optiona
 ```
 
 `install_schedule.sh` sets up the weekday launchd jobs on macOS. Day-to-day usage is covered in [USER_GUIDE.md](USER_GUIDE.md).
+
+## Data pipeline (Airflow + Spark)
+
+The research scripts and the news model read 5-minute bars and news from `data/`. I used to refresh that by rerunning `research/download.py`, which pulls everything since 2016 every time. Now an Airflow DAG keeps it up to date each weekday, checks it, and builds a daily table with PySpark. It only writes to `data/` and doesn't change anything the trading bot uses.
+
+```
+extract_bars (QQQ, SPY) -> load_bars --+
+                                       +--> quality_check --> spark_daily_bars
+extract_news -----------> load_news ---+
+```
+
+- **extract** (`pipeline/etl.py`): pulls only what's new from Alpaca (free data API, 5-minute bars + news) and saves it to `data/staging/<date>/`. Bars start from the beginning of the last day already saved, so a day that was cut off halfway gets downloaded again in full.
+- **load**: swaps the new days into `data/<SYMBOL>_5min.parquet` (writes a temp file and then renames it) and appends new articles to `data/news.jsonl`. Running it twice gives the same result.
+- **quality_check**: checks the row counts (the file can't shrink, and if there were trading days there have to be new bars), missing timestamps (every finished trading day from Alpaca's market calendar needs its 9:30-15:55 bars, with up to 5 missing allowed because IEX skips a few on slow days), duplicate bars, out-of-order bars, empty values, high/low that don't make sense, and duplicate or empty news. Extract and load retry 3 times with backoff. This task doesn't retry: it fails the run right away with the full list of problems, and the Spark step doesn't run.
+- **spark_daily_bars** (`pipeline/spark_daily.py`): a PySpark job started through `SparkSubmitOperator` on `local[*]`. It turns the bars into one row per symbol per day: OHLC, volume, VWAP, daily return, gap, intraday return, realized volatility from the 5-minute returns, 20-day annualized volatility, and volume vs the 20-day average. It writes `data/daily_bars/` as Parquet partitioned by `symbol` and `year`.
+
+Schedule: `0 18 * * 1-5` New York time (after the close, plus the free plan's 15 minute delay). Everything runs locally: Airflow standalone with SQLite and local Spark, so no cluster and nothing paid.
+
+### Running it
+
+The pipeline has its own venv so Airflow's pinned packages don't mess with the bot's. Python 3.13 and Java 17+ are needed (Spark runs on the JVM).
+
+```bash
+python3 -m venv .venv-pipeline
+.venv-pipeline/bin/pip install -r requirements-pipeline.txt \
+  --constraint https://raw.githubusercontent.com/apache/airflow/constraints-3.4.0/constraints-3.13.txt
+.venv-pipeline/bin/pip install pyspark==4.3.0
+
+pipeline/airflow.sh db migrate
+pipeline/airflow.sh dags test momentum_daily_data   # one full run in the terminal
+pipeline/airflow.sh standalone                      # scheduler + UI at http://localhost:8080
+```
+
+`pipeline/airflow.sh` points Airflow at this repo (`AIRFLOW_HOME=.airflow`, DAGs in `dags/`, a `spark_local` connection), so there's nothing to set up globally. Standalone prints the admin password the first time it starts. The Spark job also runs on its own with `.venv-pipeline/bin/python pipeline/spark_daily.py`. Set `MOMENTUM_DATA_DIR` to run against a copy of the data.
+
+First run (Nov 15, 2026): caught up 7 trading days (546 bars per symbol, which includes redoing Nov 5 since only its first half hour was saved) and 300 articles, every check passed, and Spark wrote 5,466 daily rows. I checked the Spark numbers against a pandas recompute and they matched. When I fed it a copy with a duplicate bar and a negative price, the quality check failed the run and listed both problems.

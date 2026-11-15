@@ -15,3 +15,7 @@ daytrade.pid
 data/
 *.parquet
 .DS_Store
+
+# airflow + spark pipeline (own venv, local airflow db/logs)
+.venv-pipeline/
+.airflow/
